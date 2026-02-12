@@ -1,0 +1,10 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# This line connects the local "shared" folder to this project
+shared = { path = "../shared" } 
+tokio = { version = "1", features = ["full"] }
+axum = {version = "0.7", features = ["full"]}

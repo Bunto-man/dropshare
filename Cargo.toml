@@ -1,0 +1,8 @@
+#make a workspace
+[workspace]
+members = [
+    "host",
+    "client",
+    "shared",
+]
+resolver = "2"
