@@ -27,3 +27,15 @@ If you want to run the client app on your host, you can.
 3. Have fun.
 
 **Note: I cannot make apple apps, so it may work on a Macbook, but it will not work on a phone.**
+
+Note: Linux Distro's need OpenSSL dev packages. Run this command to install it:
+
+(Works for rasberry pi OS, Mint, Debian, Ubuntu)
+
+bash
+    sudo apt update
+    sudo apt install libssl-dev pkg-config
+
+*libssl-dev: The actual OpenSSL headers.*
+
+*pkg-config: A tool that helps Rust find where those headers are located.*
