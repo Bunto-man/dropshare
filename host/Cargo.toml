@@ -4,7 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# This line connects the local "shared" folder to this project
-shared = { path = "../shared" } 
+# DOWNGRADE AXUM TO 0.6
+axum = { version = "0.6", features = ["ws", "multipart", "headers"] } 
+axum-server = { version = "0.5", features = ["tls-rustls"] } # Use 0.5 for stability with Axum 0.6
 tokio = { version = "1", features = ["full"] }
-axum = {version = "0.7", features = ["full"]}
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tower-http = { version = "0.4", features = ["fs", "cors"] } # Downgrade Tower to match
+headers = "0.3" # Required for some Axum 0.6 extractors
+futures = "0.3.31"
+rcgen = "0.11.3"

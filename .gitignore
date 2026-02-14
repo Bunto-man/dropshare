@@ -1,1 +1,5 @@
 /target
+/cert.pem
+/hConfig.ini
+/key.pem
+/cli_config.ini

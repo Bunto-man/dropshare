@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DropShare Control Center</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #f0f0f0; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+        
+        .client-card { 
+            background: #2d2d2d; 
+            border: 1px solid #444; 
+            border-radius: 8px; 
+            padding: 20px; 
+            margin-bottom: 15px; 
+            display: flex; 
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .client-header { display: flex; justify-content: space-between; align-items: center; font-size: 1.2em; }
+        .status { color: #4CAF50; font-size: 0.8em; font-weight: bold; }
+        
+        /* Custom File Input Styling */
+        .file-area { display: flex; gap: 10px; align-items: center; background: #333; padding: 10px; border-radius: 4px;}
+        input[type="file"] { color: #ccc; }
+
+        button { 
+            background: #007bff; color: white; border: none; padding: 10px 20px; 
+            cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 1em; 
+            transition: background 0.2s;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #555555; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <h1>DropShare Control Center</h1>
+    <div id="device-list">Scanning for devices...</div>
+
+    <script>
+        // Track current state to prevent unnecessary DOM wipes whenever a refresh happens
+        let currentClientIds = "";
+
+        async function loadClients() {
+            try {
+                const res = await fetch('/api/clients');
+                const clients = await res.json();
+                
+                
+                const newClientIds = clients.map(c => c.id).sort().join(',');
+                
+                if (newClientIds === currentClientIds) {
+                    return; // NOTHING CHANGED, EXIT EARLY
+                }
+                
+                // If we get here, the list changed. Update state and redraw.
+                currentClientIds = newClientIds;
+                const container = document.getElementById('device-list');
+                container.innerHTML = '';
+
+                if (clients.length === 0) {
+                    container.innerHTML = '<p style="color:#888">No active clients found.</p>';
+                    return;
+                }
+
+                clients.forEach(c => {
+                    const card = document.createElement('div');
+                    card.className = 'client-card';
+                    // added an 'onchange' to the input so you see the name immediately
+                    card.innerHTML = `
+                        <div class="client-header">
+                            <strong>${c.id}</strong> 
+                            <span class="status">● ONLINE</span>
+                        </div>
+                        <form onsubmit="uploadFile(event, '${c.id}')">
+                            <div class="file-area">
+                                <input type="file" name="file" required 
+                                    onchange="updateButtonText(this)">
+                            </div>
+                            <br>
+                            <button type="submit">Select a File first</button>
+                        </form>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (e) {
+                console.error("Connection lost:", e);
+            }
+        }
+
+        // New Helper: Updates button text immediately when file is picked
+        function updateButtonText(input) {
+            const btn = input.form.querySelector('button');
+            if (input.files.length > 0) {
+                btn.innerText = "Send " + input.files[0].name;
+                btn.style.background = "#007bff"; // Blue
+                btn.disabled = false;
+            }
+        }
+
+        async function uploadFile(e, targetId) {
+            e.preventDefault();
+            const form = e.target;
+            const input = form.querySelector('input');
+            const btn = form.querySelector('button');
+            const originalText = btn.innerText;
+
+            if (!input.files.length) {
+                alert("Please select a file first!");
+                return;
+            }
+
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // UI Feedback
+            btn.innerText = `Sending...`;
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`/api/upload/${targetId}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (res.ok) {
+                    btn.innerText = "Sent Successfully!";
+                    btn.style.background = "#28a745"; // Green
+                    
+                    // Reset the form after 2 seconds
+                    setTimeout(() => {
+                        input.value = ""; 
+                        btn.innerText = "Select a File first";
+                        btn.style.background = "";
+                        btn.disabled = false; 
+                    }, 2000);
+                } else {
+                    const errText = await res.text();
+                    alert(`Server Rejected: ${errText}`);
+                    btn.innerText = "Failed";
+                    btn.style.background = "#dc3545"; // Red
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                alert("Network Error");
+                btn.innerText = "Error";
+                btn.disabled = false;
+            }
+        }
+
+        // Start the loop
+        loadClients();
+        setInterval(loadClients, 2000);
+    </script>
+    
+</body>
+</html>
