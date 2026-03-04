@@ -103,17 +103,17 @@ async fn main() {
     println!(" Host IP: {}", config.host_ip);
     println!(" Client Name: {}", config.device_name);
 
-    let connect_addr = format!("wss://{}:443/ws", config.host_ip);
+    let connect_addr = format!("wss://{}:3000/ws", config.host_ip);
     let url = Url::parse(&connect_addr).expect("Bad URL format");
 
     println!("Connecting to {} (Ignoring Cert Errors)...", url);
-    println!("\nVisit the page using https://{}:443/",config.host_ip); //Change IP
+    println!("\nVisit the page using https://{}:3000/",config.host_ip); //Change IP
 
-    //go into the host program and change the port to 443. I don't wanna get made fun of.
+    //linux devices cannot use ports like 443 by default. they are protected. Doesn't matter though.
     
     
     // 1. Create a TCP stream first
-    let tcp_stream = tokio::net::TcpStream::connect(format!("{}:443", config.host_ip)) //change IP
+    let tcp_stream = tokio::net::TcpStream::connect(format!("{}:3000", config.host_ip)) //change IP
         .await
         .expect("Failed to open TCP connection");
 

@@ -181,7 +181,7 @@ async fn main() {
         .layer(DefaultBodyLimit::max(max_file_size)); // Change this from our lovely config folder
 
 
-    let host_address = SocketAddr::from(([0, 0, 0, 0], 443)); //Change this IP to 443 for HTTPS
+    let host_address = SocketAddr::from(([0, 0, 0, 0], 3000)); 
     println!("HTTPS Server listening for clients.\n Clients can connect now.");
 
     axum_server::bind_rustls(host_address, certificate_config)
