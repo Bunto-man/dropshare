@@ -76,15 +76,19 @@ fn load_or_create_config() -> usize {
                     .split('*')
                     .map(|s| s.trim().parse::<usize>().unwrap_or(1))
                     .product();
-                
-                println!("Configured Max Upload Size: {} bytes", calculated_size);
+                //Let's make it look nice
+                let mut pretty_size = calculated_size/(1024*1024);
+                println!("Configured Max Upload Size: {} Megabytes", pretty_size);
+                //now give the GB value
+                pretty_size/=1024;
+                println!("In Gigabytes: {} GB", pretty_size);
                 return calculated_size;
             }
         }
     }
 
     // Fallback if parsing failed
-    println!("Warning: Could not parse file_Size. Using default 1GB.");
+    println!("Warning: Could not parse file_Size parameter in hconfig.ini || Using default 1GB Max Upload Size.");
     1024 * 1024 * 1024
 }
 
@@ -121,31 +125,33 @@ fn ensure_certificates() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Add LAN IP
     if let Some(ip_str) = get_local_ip() {
         println!("Adding local IP to cert: {}", ip_str);
+        println!("The local IP is used for making certificates ONLY");
+
         if let Ok(ip) = ip_str.parse::<IpAddr>() {
             params.subject_alt_names.push(rcgen::SanType::IpAddress(ip));
         }
     }
 
-    // 3. Generate Certificate (This exists in v0.11)
+    // 3. Generate Certificate (This exists in v0.11 of rcgen)
     let cert = rcgen::Certificate::from_params(params)?;
     
     // 4. Serialize
     let pem_serialized = cert.serialize_pem()?;
     let key_serialized = cert.serialize_private_key_pem();
 
-    // 5. Write to disk
+    // 5. Write the certificates to the folder
     fs::write(&cert_path, pem_serialized)?;
     fs::write(&key_path, key_serialized)?;
 
-    println!("Certificates generated successfully!");
+    println!("HTTPS Certificates generated successfully!");
     Ok(())
 }
-
+//This is the main function
 #[tokio::main]
 async fn main() {
+
     tracing_subscriber::fmt::init();
 
-    
     // 1. LOAD CONFIGURATION
     let max_file_size = load_or_create_config();
 
@@ -156,9 +162,9 @@ async fn main() {
     }
 
     // 3. Setup HTTPS Config
-    let config = RustlsConfig::from_pem_file("cert.pem", "key.pem")
+    let certificate_config = RustlsConfig::from_pem_file("cert.pem", "key.pem")
         .await
-        .expect("Failed to load certs! Did you generate them?");
+        .expect("Failed to load HTTPS Certificates! Did you generate them?");
 
     let state = AppState {
         clients: Arc::new(Mutex::new(HashMap::new())),
@@ -175,17 +181,17 @@ async fn main() {
         .layer(DefaultBodyLimit::max(max_file_size)); // Change this from our lovely config folder
 
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("HTTPS Server listening on https://{}/", addr);
+    let host_address = SocketAddr::from(([0, 0, 0, 0], 443)); //Change this IP to 443 for HTTPS
+    println!("HTTPS Server listening for clients.\n Clients can connect now.");
 
-    axum_server::bind_rustls(addr, config)
+    axum_server::bind_rustls(host_address, certificate_config)
         .serve(app.into_make_service())
         .await
         .unwrap();
 }
 
 async fn serve_index() -> Html<&'static str> {
-    Html(include_str!("../index.html"))
+    Html(include_str!("../index.html"))//maybe go through and clean up the HTML?
 }
 
 async fn list_clients(State(state): State<AppState>) -> Json<Vec<ClientInfo>> {
@@ -232,6 +238,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
 async fn upload_file(
     Path(target_id): Path<String>,
+    headers: axum::http::HeaderMap,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
@@ -248,20 +255,52 @@ async fn upload_file(
         }
     };
 
-    // Loop through the "form" data
-    while let Ok(Some(field)) = multipart.next_field().await {
-        let filename = field.file_name().unwrap_or("unknown.bin").to_string();
-        println!("Receiving file: {}", filename); // Log filename
+    //get the expected size of the file!
+    let expected_size: u64 = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|val| val.to_str().ok())
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(0);
 
-        // Read the data (This might take a while for big files)
-        match field.bytes().await {
-            Ok(data) => {
-                println!("File size: {} bytes. Sending to client...", data.len());
-                let _ = tx.send(Message::Text(filename));
-                let _ = tx.send(Message::Binary(data.to_vec()));
-            }
-            Err(e) => println!("Failed to read file bytes: {}", e),
+    // Loop through the "form" data
+    while let Ok(Some(mut field)) = multipart.next_field().await {
+        let filename = field.file_name().unwrap_or("unknown.bin").to_string();
+        //grab the file name.
+        println!("Receiving file stream: {}", filename); 
+
+        //modify this to handle the filename and the file size. separate by pipe...
+        let metadata_msg = format!("{}|{}", filename, expected_size);
+        if tx.send(Message::Text(metadata_msg)).is_err() {
+            println!("Error: Client disconnected before transfer.");
+            break;
         }
+
+        let mut total_bytes = 0;
+
+        // 2. Stream the file natively using Axum's .chunk() method
+        // This pulls small chunks (usually a few KB at a time) from the HTTP request
+        while let Ok(Some(chunk)) = field.chunk().await {
+            total_bytes += chunk.len();
+            
+            // Instantly send that small chunk over the WebSocket
+            if tx.send(Message::Binary(chunk.to_vec())).is_err() {
+                println!("Error: Client disconnected during the transfer of {}.",filename);
+                break; // Stop reading if the client drops
+            }
+        }
+            //Make this look better.
+        //println!("Streamed {} total bytes. Sending EOF...", total_bytes);
+
+        //make 2 new variables. Is this terrible for RAM?
+        let send_mbytes=total_bytes as f64/( 1024.0*1024.0); 
+        let send_gbytes=send_mbytes/1024.0;
+
+        //by making them doubles, they can show up more accurately.
+        println!("Streamed {} total bytes ({:.2} MB / {:.2} GB). Sending EOF...", 
+                 total_bytes, send_mbytes, send_gbytes);
+
+        // 3. Tell the Windows client to close and save the file
+        let _ = tx.send(Message::Text("EOF".to_string()));
     }
 
     println!("Upload complete!");
