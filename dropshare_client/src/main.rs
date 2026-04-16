@@ -214,7 +214,7 @@ fn main() {
                 println!("\nHost closed the connection.");
                 break;
             }
-            // Tungstenite handles Ping/Pong automatically behind the scenes when you call .read()
+            // Tungstenite handles Ping/Pong automatically behind the scenes
             _ => {}
         }
     }
