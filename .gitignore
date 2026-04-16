@@ -3,3 +3,5 @@
 /hConfig.ini
 /key.pem
 /cli_config.ini
+/files
+/dropshare_client/src/safe.txt
