@@ -16,3 +16,4 @@ tower-http = { version = "0.4", features = ["fs", "cors"] } # Downgrade Tower to
 headers = "0.3" # Required for some Axum 0.6 extractors
 futures = "0.3.31"
 rcgen = "0.11.3"
+mimalloc = "0.1.48"

@@ -21,7 +21,7 @@ Instructions:
 
 1. Extract and run host program (use a Rasbpi). A config file called hconfig will be made. Edit this config to change the maximum file size.
 
-2. Run the client app on your computer(s). This will generate a client config file, and close the app. Enter the tailscale IP of the host device. Enter the name of your client.
+2. Run the client app on your computer(s). This will generate a client config file, and close the app. Enter the tailscale IP of the host device. Enter the name you want for your client.
 If you want to run the client app on your host, you can.
     
 Re-run the app. control+click on the link made in the terminal to auto-open the browser. 
@@ -40,3 +40,6 @@ bash
 *libssl-dev: The actual OpenSSL headers.*
 
 *pkg-config: A tool that helps Rust find where those headers are located.*
+
+## April Rewrite
+This rewrite focuses on the speed of the program and an effort to save resource use on the client and host programs.

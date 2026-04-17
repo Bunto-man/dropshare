@@ -1,3 +1,4 @@
+use mimalloc::MiMalloc;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -24,7 +25,7 @@ use tokio::sync::mpsc;
 use serde::Serialize;
 use futures::{sink::SinkExt, stream::StreamExt};
 
-type Tx = mpsc::UnboundedSender<Message>;
+type Tx = mpsc::Sender<Message>;
 
 #[derive(Clone)]
 struct AppState {
@@ -36,8 +37,9 @@ struct ClientInfo {
     id: String,
     status: String,
 }
-
-// CONFIGURATION LOADER
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+/// CONFIGURATION LOADER
 fn load_or_create_config() -> usize {
     let config_path = "hConfig.ini";
     let default_size_str = "1024*1024*1024"; // 1GB representation
@@ -77,11 +79,14 @@ fn load_or_create_config() -> usize {
                     .map(|s| s.trim().parse::<usize>().unwrap_or(1))
                     .product();
                 //Let's make it look nice
-                let mut pretty_size = calculated_size/(1024*1024);
-                println!("Configured Max Upload Size: {} Megabytes", pretty_size);
-                //now give the GB value
-                pretty_size/=1024;
-                println!("In Gigabytes: {} GB", pretty_size);
+                let pretty_size = calculated_size as f64; //in megabytes
+                if (pretty_size /(1024.0*1024.0*1024.0))>1.0{
+                    println!("Configured Max Upload Size: {} Gigabytes", pretty_size/(1024.0*1024.0*1024.0));
+                }else if (pretty_size /(1024.0*1024.0))>1.0{
+                    println!("Configured Max Upload Size: {} Megabytes", pretty_size/(1024.0*1024.0));
+                }else if (pretty_size /(1024.0))>1.0{
+                    println!("Configured Max Upload Size: {} Kilobytes", pretty_size/1024.0);
+                }
                 return calculated_size;
             }
         }
@@ -94,13 +99,14 @@ fn load_or_create_config() -> usize {
 
 
 
-// Helper to find the LAN IP so other devices can connect
+/// Helper to find the LAN IP so other devices can connect
 fn get_local_ip() -> Option<String> {
     let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
     Some(sock.local_addr().ok()?.ip().to_string())
 }
 
+///Ensure that certificates are made before running
 fn ensure_certificates() -> Result<(), Box<dyn std::error::Error>> {
     let cert_path = PathBuf::from("cert.pem");
     let key_path = PathBuf::from("key.pem");
@@ -146,8 +152,9 @@ fn ensure_certificates() -> Result<(), Box<dyn std::error::Error>> {
     println!("HTTPS Certificates generated successfully!");
     Ok(())
 }
+
 //This is the main function
-#[tokio::main]
+#[tokio::main(worker_threads = 2)]
 async fn main() {
 
     tracing_subscriber::fmt::init();
@@ -189,11 +196,11 @@ async fn main() {
         .await
         .unwrap();
 }
-
+///Uses the HTML in index
 async fn serve_index() -> Html<&'static str> {
     Html(include_str!("../index.html"))//maybe go through and clean up the HTML?
 }
-
+///Lists the clients that are active and can be spoken to
 async fn list_clients(State(state): State<AppState>) -> Json<Vec<ClientInfo>> {
     let map = state.clients.lock().unwrap();
     let list = map.keys()
@@ -208,7 +215,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::channel(32);
     
     let mut client_id: Option<String> = None;
 
@@ -270,7 +277,7 @@ async fn upload_file(
 
         //modify this to handle the filename and the file size. separate by pipe...
         let metadata_msg = format!("{}|{}", filename, expected_size);
-        if tx.send(Message::Text(metadata_msg)).is_err() {
+        if tx.send(Message::Text(metadata_msg)).await.is_err() {
             println!("Error: Client disconnected before transfer.");
             break;
         }
@@ -283,7 +290,7 @@ async fn upload_file(
             total_bytes += chunk.len();
             
             // Instantly send that small chunk over the WebSocket
-            if tx.send(Message::Binary(chunk.to_vec())).is_err() {
+            if tx.send(Message::Binary(chunk.to_vec())).await.is_err() {
                 println!("Error: Client disconnected during the transfer of {}.",filename);
                 break; // Stop reading if the client drops
             }
@@ -296,11 +303,11 @@ async fn upload_file(
         let send_gbytes=send_mbytes/1024.0;
 
         //by making them doubles, they can show up more accurately.
-        println!("Streamed {} total bytes ({:.2} MB / {:.2} GB). Sending EOF...", 
+        println!("Streamed {} total bytes ({:.2} MB || {:.2} GB). Sending EOF...", 
                  total_bytes, send_mbytes, send_gbytes);
 
         // 3. Tell the Windows client to close and save the file
-        let _ = tx.send(Message::Text("EOF".to_string()));
+        let _ = tx.send(Message::Text("EOF".to_string())).await;
     }
 
     println!("Upload complete!");
