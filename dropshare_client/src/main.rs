@@ -2,6 +2,7 @@
 use native_tls::TlsConnector;
 use tungstenite::{client, Message};
 use url::Url;
+use mimalloc::MiMalloc;
 
 use std::{
     fs::{self, File},
@@ -17,6 +18,10 @@ struct ClientConfig {
     host_ip: String,
     device_name: String,
 }
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 ///Loads a config file, or creates a config file if there is not a config file available
 /// 
 /// * `ClientConfig` - creates a struct for the client.

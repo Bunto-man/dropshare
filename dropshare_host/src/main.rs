@@ -1,17 +1,15 @@
 use mimalloc::MiMalloc;
 use axum::{
     extract::{
+        DefaultBodyLimit,
         ws::{Message, WebSocket, WebSocketUpgrade},
         Multipart, State, Path,
-    },
+},
     http::StatusCode,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
     Router,
 };
-
-use axum::extract::DefaultBodyLimit; //This import defines how big the files are allowed to be.
-
 use axum_server::tls_rustls::RustlsConfig;
 use std::{
     fs::{File,self},
@@ -24,7 +22,6 @@ use std::{
 use tokio::sync::mpsc;
 use serde::Serialize;
 use futures::{sink::SinkExt, stream::StreamExt};
-
 type Tx = mpsc::Sender<Message>;
 
 #[derive(Clone)]
@@ -48,6 +45,7 @@ fn load_or_create_config() -> usize {
     if !std::path::Path::new(config_path).exists() {
         println!("Config file not found. Creating {}...", config_path);
         let mut file = File::create(config_path).expect("Failed to create config file");
+
         writeln!(file, "[Settings]").unwrap();
         writeln!(file, "# Set the max upload size in bytes (math allowed, e.g., 1024*1024*1024 = 1GB, so change it as you need to and re-run the EXE.)").unwrap();
         writeln!(file, "file_Size = {}", default_size_str).unwrap();
@@ -57,7 +55,7 @@ fn load_or_create_config() -> usize {
     }
 
     // 2. Read existing file
-    println!("Reading configuration from {}...", config_path);
+    println!("Reading configuration...");
     let file = File::open(config_path).expect("Failed to open config file");
     let reader = BufReader::new(file);
 
@@ -80,11 +78,11 @@ fn load_or_create_config() -> usize {
                     .product();
                 //Let's make it look nice
                 let pretty_size = calculated_size as f64; //in megabytes
-                if (pretty_size /(1024.0*1024.0*1024.0))>1.0{
+                if (pretty_size /(1000.0*1000.0*1000.0))>1.0{
                     println!("Configured Max Upload Size: {} Gigabytes", pretty_size/(1024.0*1024.0*1024.0));
-                }else if (pretty_size /(1024.0*1024.0))>1.0{
+                }else if (pretty_size /(1000.0*1000.0))>1.0{
                     println!("Configured Max Upload Size: {} Megabytes", pretty_size/(1024.0*1024.0));
-                }else if (pretty_size /(1024.0))>1.0{
+                }else if (pretty_size /(1000.0))>1.0{
                     println!("Configured Max Upload Size: {} Kilobytes", pretty_size/1024.0);
                 }
                 return calculated_size;
@@ -114,12 +112,9 @@ fn ensure_certificates() -> Result<(), Box<dyn std::error::Error>> {
     // Create host directory if it doesn't exist
     if let Some(parent) = cert_path.parent() {
         fs::create_dir_all(parent)?;
-    }
-
-    if cert_path.exists() && key_path.exists() {
+    }if cert_path.exists() && key_path.exists() {
         return Ok(());
     }
-
     println!("Generating self-signed certificates...");
 
     // 1. Generate params 
