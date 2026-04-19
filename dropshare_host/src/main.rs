@@ -3,10 +3,11 @@ use axum::{
     extract::{
         DefaultBodyLimit,
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Multipart, State, Path,
+        Multipart, State, Path, ConnectInfo,
 },
-    http::StatusCode,
-    response::{Html, IntoResponse, Json},
+middleware::{self,Next},
+    http::{StatusCode,Request},
+    response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -18,6 +19,7 @@ use std::{
     sync::{Arc, Mutex},
     path::PathBuf,
     io::{Write, BufRead, BufReader},
+    time::Instant
 };
 use tokio::sync::mpsc;
 use serde::Serialize;
@@ -34,8 +36,10 @@ struct ClientInfo {
     id: String,
     status: String,
 }
+
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
+
 /// CONFIGURATION LOADER
 fn load_or_create_config() -> usize {
     let config_path = "hConfig.ini";
@@ -133,19 +137,46 @@ fn ensure_certificates() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 3. Generate Certificate (This exists in v0.11 of rcgen)
     let cert = rcgen::Certificate::from_params(params)?;
-    
-    // 4. Serialize
     let pem_serialized = cert.serialize_pem()?;
     let key_serialized = cert.serialize_private_key_pem();
 
-    // 5. Write the certificates to the folder
     fs::write(&cert_path, pem_serialized)?;
     fs::write(&key_path, key_serialized)?;
 
     println!("HTTPS Certificates generated successfully!");
     Ok(())
+}
+
+async fn tailscale_only_middleware<B>(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request<B>,
+    next: Next<B>,
+) -> Response {
+    let ip = addr.ip();
+
+    // Tailscale uses the Carrier-Grade NAT (CGNAT) space: 100.64.0.0/10
+    let is_tailscale = match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // Checks if the IP starts with 100. and the second octet is between 64 and 127
+            octets[0] == 100 && (octets[1] >= 64 && octets[1] <= 127)
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            // Tailscale IPv6 space starts with fd7a:115c:a1e0::/48
+            let segments = ipv6.segments();
+            segments[0] == 0xfd7a && segments[1] == 0x115c && segments[2] == 0xa1e0
+        }
+    };
+
+    // Allow Tailscale IPs, and allow localhost so you can still test it directly on the Pi
+    if is_tailscale || ip.is_loopback() {
+        next.run(request).await // Let them through!
+    } else {
+        // Drop the connection and log the intrusion attempt
+        println!("Blocked unauthorized network attempt from: {}", ip);
+        (StatusCode::FORBIDDEN, "Access Denied. Try again some other time, sucker.").into_response()
+    }
 }
 
 //This is the main function
@@ -178,16 +209,14 @@ async fn main() {
         .route("/api/upload/:target", post(upload_file))
         .route("/ws", get(ws_handler))
         .with_state(state)
+        .layer(DefaultBodyLimit::max(max_file_size)) // Change this from our lovely config folder
+        .layer(middleware::from_fn(tailscale_only_middleware)); //implement the tailscale barrier to prevent others from getting in.
 
-        //THIS CONTROLS FILE SIZE. CHANGE AS LARGE OR AS SMALL AS NEEDED.
-        .layer(DefaultBodyLimit::max(max_file_size)); // Change this from our lovely config folder
-
-
-    let host_address = SocketAddr::from(([0, 0, 0, 0], 3000)); 
-    println!("HTTPS Server listening for clients.\n Clients can connect now.");
+    let host_address = SocketAddr::from(([0, 0, 0, 0], 3000)); //LocalHost
+    println!("HTTPS Server listening for clients.\n");
 
     axum_server::bind_rustls(host_address, certificate_config)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
 }
@@ -224,7 +253,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         if let Message::Text(text) = msg {
             if text.starts_with("ID:") {
                 let id = text.replace("ID:", "");
-                println!("Client Connected: {}", id);
+
+                println!("Client Connected: {}\n", id);
+
                 state.clients.lock().unwrap().insert(id.clone(), tx.clone());
                 client_id = Some(id);
             }
@@ -233,7 +264,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     send_task.abort();
     if let Some(id) = client_id {
-        println!("Client Disconnected: {}", id);
+        println!("Client Disconnected: {}\n", id);
         state.clients.lock().unwrap().remove(&id);
     }
 }
@@ -264,6 +295,7 @@ async fn upload_file(
         .and_then(|val| val.parse().ok())
         .unwrap_or(0);
 
+    let mut last_print=Instant::now(); 
     // Loop through the "form" data
     while let Ok(Some(mut field)) = multipart.next_field().await {
         let filename = field.file_name().unwrap_or("unknown.bin").to_string();
@@ -291,16 +323,18 @@ async fn upload_file(
             }
         }
             //Make this look better.
-        //println!("Streamed {} total bytes. Sending EOF...", total_bytes);
-
-        //make 2 new variables. Is this terrible for RAM?
-        let send_mbytes=total_bytes as f64/( 1024.0*1024.0); 
-        let send_gbytes=send_mbytes/1024.0;
-
-        //by making them doubles, they can show up more accurately.
-        println!("Streamed {} total bytes ({:.2} MB || {:.2} GB). Sending EOF...", 
-                 total_bytes, send_mbytes, send_gbytes);
-
+        let bytemark = total_bytes as f64;
+    if last_print.elapsed().as_millis()>200{
+            if ( bytemark/(1000.0*1000.0*1000.0))>1.0{
+                    println!("Sending Data:  {:.2} Gigabytes", bytemark/(1024.0*1024.0*1024.0));
+                }else if (bytemark /(1000.0*1000.0))>1.0{
+                    println!("Sending Data:  {:.2} Megabytes", bytemark/(1024.0*1024.0));
+                }else if (bytemark /(1000.0))>1.0{
+                    println!("Sending Data:  {:.2} Kilobytes", bytemark/1024.0);
+                }
+                last_print = Instant::now();
+    }//printBlock
+        
         // 3. Tell the Windows client to close and save the file
         let _ = tx.send(Message::Text("EOF".to_string())).await;
     }

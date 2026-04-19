@@ -1,21 +1,22 @@
-## Dropshare
-Update 1.1 --The Big Fix--
+# Dropshare
+### Update 2.1 - Fool's Gold
+
 Welcome to Dropshare, a program that acts parallel to my rshare program.
 
-**Features**
+### Features
 
 * Communicate with any device on your tailscale network
 * Made to route files, not download them
 * Read feedback logs from both the client and host.
 * Features https encryption, just like the previous rshare
-* Discoverable by devices on your tailnet ONLY.
+* Discoverable by devices on your tailnet *ONLY*.
 
-*Why is this any different from rshare?*
+*How is dropshare different from rshare?*
 
- This program is made to stay running on the Pi, 
-or another device, always ready to serve files between your devices.
+ Dropshare will run perpetually on the raspberryPi 
+(or another device), always ready to serve files between your devices using the clever client program.
 
-**You need an account with Tailscale.**
+**You need an account with Tailscale**
 
 Instructions: 
 
@@ -27,13 +28,13 @@ If you want to run the client app on your host, you can.
 Re-run the app. control+click on the link made in the terminal to auto-open the browser. 
 3. Have fun.
 
-**Note: I cannot make apple apps, so it may work on a Macbook, but it will not work on a phone.**
 
-Note: Linux Distro's need OpenSSL dev packages. Run this command to install it:
+Note: Linux Distros need OpenSSL dev packages. Run this command to install OpenSSL packages:
 
-(Works for rasberry pi OS, Mint, Debian, Ubuntu)
+(Works best for rasberry pi OS, Mint, Debian, Ubuntu)
 
-bash
+bash:
+
     sudo apt update
     sudo apt install libssl-dev pkg-config
 
@@ -41,5 +42,12 @@ bash
 
 *pkg-config: A tool that helps Rust find where those headers are located.*
 
-## April Rewrite
-This rewrite focuses on the speed of the program and an effort to save resource use on the client and host programs.
+## April Rework (Fool's Gold)
+This rework focuses on the speed of the program and an effort to save resource use on the client and host programs.
+
+* Multiple files can now be uploaded at once. 
+* More focus given to efficiency
+* improved security. No more local access
+* managed Tokio threads
+* Better terminal feedback
+* Better Filesize Solutions
